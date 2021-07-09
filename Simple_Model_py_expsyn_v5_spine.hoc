@@ -1,0 +1,406 @@
+// COMPARTMENTAL MODEL OF ICX NEURON
+// Created by Brian Fischer and Oliver Tufte 
+
+//SECTION 1: CREATING AND DEFINING THE CELL
+
+// First create a random variable
+var = 1/29
+objref r, pc
+pc = new ParallelContext()
+r = new Random(pc.time())
+
+// Now create objects for the soma, the four dendrites, and the spines
+create soma, dend[5], spine[40] 
+
+// celldef procedure
+// Runs all the helper methods that will piece together the cell.
+proc celldef() {
+	topol() 
+	geom(20, 15, 5 , 5, 4, 4, 5, 200)
+	biophys(.0008,.0008)
+	spines(1,20,.0002)
+	spines_soma(1,20,.0002)
+	geom_nseg()
+}
+
+// topol procedure 
+// Connects all the dendrites to the soma
+proc topol() { local i
+	for i = 0, 1 connect dend[i](0), soma(1)
+	for i = 2, 4 connect dend[i](0), soma(0)
+	basic_shape()
+}
+
+// spines procedure
+// defines the geometry of the dendrite spines and connects them to the dendrites
+// also inserts passive membrane to dendritic spines
+proc spines(){
+	d = 0
+	for i =0,29{
+		d = d%5
+		spine[i]{
+			// spine geometry
+			diam = $1*r.uniform(.90,1.1) 
+			L = $2*r.uniform(.90,1.1) 
+			
+			// insert passive membrane
+			insert pas
+				g_pas = $3 
+				e_pas = -65
+		}
+		connect spine[i](0),dend[d](i*var)
+		d = d+3
+	}
+}
+
+// spines soma procedure
+// defines the geometry of somatic spines and connects them to the soma
+// also inserts passive membrane to somatic spines
+proc spines_soma(){
+	for i = 30,39{
+		spine[i]{
+			// spine geometry
+			diam = $1 
+			L = $2 
+			
+			// insert pasive membrane
+			insert pas
+				g_pas = $3 
+				e_pas = -65
+		}
+		connect spine[i](0),soma((1/9)*(i-30))
+	}
+}
+
+// basic_shape procedure
+// creates a general outline of what the model neuron will look like
+proc basic_shape() {
+	soma {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(15, 0, 0, 1)}
+	dend {pt3dclear() pt3dadd(15, 0, 0, 1) pt3dadd(90, 45, 0, 1)}
+	dend[1] {pt3dclear() pt3dadd(15, 0, 0, 1) pt3dadd(90, -29, 0, 1)}
+	dend[2] {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(-29, -74, 0, 1)}
+	dend[3] {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(-74, 15, 0, 1)}
+	dend[4] {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(-59, 60, 0, 1)}
+}
+
+// geom procedure
+// Defines the geometry of the dendrites and soma
+// Parameters in order 1. soma diameter, 2. soma length, 3.-7. dendrite diameters, 8. dendrite length
+proc geom() {
+	soma.diam = $1 
+	soma.L = $2 
+	
+	dend[0].diam = $3 
+	dend[1].diam = $4 
+	dend[2].diam = $5 
+	dend[3].diam = $6 
+	dend[4].diam = $7 
+	for i = 0,4{
+		dend[i].L = $8 
+	}
+}
+
+// geom_nseg procedure
+// defines the number of segments in each compartment
+// the smaller this is, the faster the simulations will run
+proc geom_nseg() {
+	forall{
+		nseg = 20
+	}
+}
+
+// biophys procedure
+// inserts passive membrane to the soma and the dendrites
+// If adding HH or other active membrane stuff, do that here
+proc biophys() {
+	soma {
+		// insert pasive membrane
+  		insert pas
+			g_pas = $1
+			e_pas = -65
+	}
+	
+	for i = 0, 4{
+		dend[i] {
+			insert pas
+				g_pas = $2
+				e_pas = -65
+		}
+	}
+}
+
+// Call the celldef procedure before setting up simulation
+celldef()
+
+//SECTION 2: SETTING UP A SIMULATION
+
+// how long is simulation in ms
+tstop = 100
+
+// length of the time vector
+// dt is pre-defined NEURON parameter
+tlength = tstop/dt
+
+// create objects to hold synapes
+objref syn[40]
+objref s[40]
+objref nc[40]
+syn_num = 0
+
+// create objects for expsyn input (altered in python)
+number = 0
+start = 0
+noise = 0
+weight = 0
+
+// stim_exp procedure
+// places AMPA style synapses on to the model neuron
+// parameters in order: 1. spine_num, 2. location on spine, 3. interval between spikes
+proc stim_exp(){
+	// take location parameters into variables
+	spine_num = $1
+	loc = $2
+	
+	// create a Network Stim
+	access spine[spine_num]
+	s[syn_num] = new NetStim(loc)
+	s[syn_num].interval = $3
+	s[syn_num].number = number
+	s[syn_num].start = start
+	s[syn_num].noise = noise
+	
+	// Seed the NetStim, so input will not always be the same
+	p_seed = int(r.uniform(1,100))
+	s[syn_num].seed(p_seed)
+	
+	// Create Exponential Synapse (AMPA style)
+	syn[syn_num] = new ExpSyn(loc) // places a new Exponential Synapse at loc
+	syn[syn_num].tau = 20
+	syn[syn_num].e = 0
+	
+	// Network Connection (connects the NetStim to the synapse object) 
+	// Parameters given: 1. NetStim, 2. Synapse, 3. threshhold, 4. delay, 5. weight
+	nc[syn_num] = new NetCon(s[syn_num], syn[syn_num], 10, .1, weight)
+	
+	// increment the syn_num so multiple can be created
+	syn_num = syn_num+1
+}
+
+// STEP 3: SETTING UP RECORDING
+
+// Record the time variable
+objref rect
+rect = new Vector() 
+proc get_rect(){ 
+	rect.record(&t)
+	init()
+	run()
+	rect.play_remove()""
+}
+
+
+//Record at the Soma in the center (at .5)
+objref soma_voltage
+soma_voltage = new Vector()
+proc get_v_soma(){ 
+	soma_voltage.record(&soma.v(0.5))
+	init()
+	run()
+	soma_voltage.play_remove()
+}
+
+// Create objects to hold voltage recordings for the three types of stimulation
+objref soma_response1, soma_response2
+objref soma_combined
+objref soma_ind_combo
+
+objref itd_i
+
+soma_response1 = new Vector()
+soma_response2 = new Vector()
+soma_combined = new Vector()
+soma_ind_combo = new Vector()
+
+// STEP 4: RUN SIMULATION
+
+// set parameters to zero here, they will be manipulated in python
+w =  0
+w2 = 0
+itd_p = 0
+f_p_1 = 0
+f_p_2 = 0
+f_i_1 = 0
+f_i_2 = 0
+max_int = 0
+itd_i = new Vector()
+
+nsim = 100 // number of simulations for each case (res1,res2,sim)
+
+for k = 0, nsim{
+	itd_i.append(1) // itd_i will be changed in python, but is defined here
+}
+
+
+// function to determine input intervals
+//params (in order) 1.w, 2.itd_p, 3.itd_i, 4.f_p, 5.f_i, 6.f_i2, 7.w2
+func gauss(){
+	b1 = ( 17-sqrt(17^2-4*2.8*(24.12-2.44*$5))) / (2*2.8)
+	b2 = ( 17-sqrt(17^2-4*2.8*(24.12-2.44*$6))) / (2*2.8)
+	
+	a = ($1*(exp(b1*(cos(2*PI*$5*($2 - $3))))-exp(-b1)) / (exp(b1)-exp(-b1)))*exp(-.5*((($4 - $5)/$7)^2)) + ($1*(exp(b2*(cos(2*PI*$6*($2 - $3))))-exp(-b2)) / (exp(b2)-exp(-b2)))*exp(-.5*((($4 - $6)/$7)^2)) + (1/max_int)	
+	return a
+}
+
+// procedure that runs the simulation
+// this is called in the python code
+proc run_simulation(){
+	
+	// Stimulates neuron model with frequency 1 input
+	// Synapses grouped by preferred frequency
+	for k =0,nsim{
+	
+		syn_num = 0 // resets synapse number to 0. This is changed in the stim_exp() procedure
+		
+		// Group 1
+		int1 = gauss(w , itd_p, itd_i.x(k), f_p_1, f_i_1 ,f_i_1, w2)
+		stim_exp(25,.5, 1/ int1)
+		stim_exp(25,.5, 1/ int1)
+		stim_exp(24,.9, 1/ int1)
+		stim_exp(24,.9, 1/ int1)
+		stim_exp(20,.5, 1/ int1)
+		stim_exp(20,.5, 1/ int1)
+		stim_exp(19,.9, 1/ int1)
+		stim_exp(19,.9, 1/ int1)
+		stim_exp(14,.9, 1/ int1) 
+		stim_exp(14,.9, 1/ int1) 
+		stim_exp(15,.5, 1/ int1)
+		stim_exp(15,.5, 1/ int1)
+
+		// Group 2
+		int2 = gauss(w , itd_p, itd_i.x(k), f_p_2, f_i_1 ,f_i_1 , w2)
+		stim_exp(27,.5, 1/ int2)
+		stim_exp(27,.5, 1/ int2)
+		stim_exp(26,.9, 1/ int2)
+		stim_exp(26,.9, 1/ int2)
+		stim_exp(22,.5, 1/ int2)
+		stim_exp(22,.5, 1/ int2)
+		stim_exp(21,.9, 1/ int2)
+		stim_exp(21,.9, 1/ int2)
+		stim_exp(17,.5, 1/ int2)
+		stim_exp(17,.5, 1/ int2)
+		stim_exp(16,.9, 1/ int2)
+		stim_exp(16,.9, 1/ int2)
+		
+		get_v_soma()
+		v_med = soma_voltage.median(0,4000) // find the median response
+		
+		soma_response1.append(v_med)
+		
+		soma_voltage.resize(0) //clears this vector
+	}
+	
+	// Stimulates model neuron with frequency 2 input
+	for k =0,nsim{
+		syn_num = 0
+		
+		//Group 1
+		int1 = gauss(w, itd_p, itd_i.x(k), f_p_1, f_i_2 ,f_i_2 , w2)
+		stim_exp(25,.5, 1/ int1)
+		stim_exp(25,.5, 1/ int1)
+		stim_exp(24,.9, 1/ int1)
+		stim_exp(24,.9, 1/ int1) 
+		stim_exp(20,.5, 1/ int1)
+		stim_exp(20,.5, 1/ int1)
+		stim_exp(19,.9, 1/ int1)
+		stim_exp(19,.9, 1/ int1)
+		stim_exp(14,.9, 1/ int1) 
+		stim_exp(14,.9, 1/ int1) 
+		stim_exp(15,.5, 1/ int1)
+		stim_exp(15,.5, 1/ int1)
+		
+		// Group 2
+		int2 = gauss(w, itd_p, itd_i.x(k), f_p_2, f_i_2 ,f_i_2, w2)
+		stim_exp(27,.5, 1/ int2)
+		stim_exp(27,.5, 1/ int2)
+		stim_exp(26,.9, 1/ int2)
+		stim_exp(26,.9, 1/ int2)
+		stim_exp(22,.5, 1/ int2)
+		stim_exp(22,.5, 1/ int2)
+		stim_exp(21,.9, 1/ int2)
+		stim_exp(21,.9, 1/ int2)
+		stim_exp(17,.5, 1/ int2)
+		stim_exp(17,.5, 1/ int2)
+		stim_exp(16,.9, 1/ int2)
+		stim_exp(16,.9, 1/ int2)
+		
+		get_v_soma()
+		v_med = soma_voltage.median(0,4000)
+		soma_response2.append(v_med)
+		
+		soma_voltage.resize(0) //clears this vector
+	}
+	
+	// Stimulates model neuron with both frequency 1 and frequency 2 simultaneously
+	for k = 0, nsim{
+		syn_num = 0
+		
+		// Group 1
+		int1 = gauss(w, itd_p, itd_i.x(k), f_p_1, f_i_1 ,f_i_2 , w2)
+		stim_exp(25,.5, 1/ int1)
+		stim_exp(25,.5, 1/ int1)
+		stim_exp(24,.9, 1/ int1)
+		stim_exp(24,.9, 1/ int1) 
+		stim_exp(20,.5, 1/ int1)
+		stim_exp(20,.5, 1/ int1)
+		stim_exp(19,.9, 1/ int1)
+		stim_exp(19,.9, 1/ int1)
+		stim_exp(14,.9, 1/ int1) 
+		stim_exp(14,.9, 1/ int1) 
+		stim_exp(15,.5, 1/ int1)
+		stim_exp(15,.5, 1/ int1)
+		
+
+		// Group 2
+		int2 = gauss(w, itd_p, itd_i.x(k), f_p_2, f_i_1 ,f_i_2 , w2)
+		stim_exp(27,.5, 1/ int2)
+		stim_exp(27,.5, 1/ int2)
+		stim_exp(26,.9, 1/ int2)
+		stim_exp(26,.9, 1/ int2)
+		stim_exp(22,.5, 1/ int2)
+		stim_exp(22,.5, 1/ int2)
+		stim_exp(21,.9, 1/ int2)
+		stim_exp(21,.9, 1/ int2)
+		stim_exp(17,.5, 1/ int2)
+		stim_exp(17,.5, 1/ int2)
+		stim_exp(16,.9, 1/ int2)
+		stim_exp(16,.9, 1/ int2)
+		
+		get_v_soma()
+		v_med = soma_voltage.median(0,4000)
+	
+		soma_combined.append(v_med)
+		
+		soma_voltage.resize(0) //clears this vector
+	}
+	
+	// using the response 1 and response 2 create the independent response vector
+	temp = 0
+	for k = 0, nsim{
+		temp = -65 + (soma_response1.x(k)+65)+(soma_response2.x(k)+65)
+		soma_ind_combo.append(temp)
+	}
+}
+
+// STEP 5: OUTPUT THE DATA
+objref savdata
+strdef filename
+proc exportdata(){
+	print "Simulation Complete...Exporting Data"
+	sprint(filename,"")
+	savdata = new File(filename)
+	savdata.wopen(filename)
+	savdata.printf("weight, independent linear comb, simultaneous input\n")
+	for p=0,0{
+		savdata.printf("%g , %g,%g\n",soma_ind_combo.x(p) ,soma_combined.x(p))
+	}
+}
