@@ -1,4 +1,4 @@
-# Gorman et al. PLos CB 2021
+# Gorman et al. PLoS CB 2021
 Files to reproduce results of:
 
 [Diverse processing underlying frequency integration in midbrain neurons of barn owls](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1009569)
